@@ -1,0 +1,158 @@
+import os
+import asyncio
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import edge_tts
+
+# ----------------- CONFIGURATION -----------------
+TOKEN = "8831687058:AAG3zOjL7tSVpu7O01BV_lfYMk4MDfUCVhg"
+CHANNEL_ID = -1003712550453
+CHANNEL_LINK = "https://t.me/moti16tf"
+MAX_CHARACTERS = 3000                       # တစ်ကြိမ်လျှင် အများဆုံး ပို့နိုင်မည့် စာလုံးရေ (၃,၀၀၀)
+
+bot = telebot.TeleBot(TOKEN)
+
+# User တစ်ယောက်ချင်းစီ၏ ရွေးချယ်ထားသော အသံ
+user_voices = {}
+
+# မြန်မာ AI အသံများ (edge-tts)
+VOICES = {
+    "female": "my-MM-NilarNeural",  # အမျိုးသမီးအသံ
+    "male": "my-MM-ThihaNeural"     # အမျိုးသားအသံ
+}
+
+# ----------------- HELPER FUNCTIONS -----------------
+# Async နဲ့ edge-tts ခေါ်ယူထုတ်လုပ်ခြင်း
+async def generate_audio(text, voice, filename):
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(filename)
+
+# User က Channel ဝင်ထားခြင်း ရှိ/မရှိ စစ်ဆေးသည့် Function
+def is_user_joined(user_id):
+    try:
+        member = bot.get_chat_member(CHANNEL_ID, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except Exception as e:
+        print(f"Check Join Error: {e}")
+        return True
+
+# Channel မဝင်ရသေးပါက ပြသမည့် Message & Buttons
+def send_force_join_msg(chat_id):
+    welcome_text = (
+        "⚠️ **Channel မဝင်ရသေးပါ!**\n\n"
+        "ဒီ AI Voice Bot ကို အခမဲ့ သုံးနိုင်ရန်အတွက် အောက်ပါ ကျွန်ုပ်တို့၏ Channel ကို မဖြစ်မနေ Join ပေးရပါမည်။\n\n"
+        "Channel Join ပြီးပါက **'✅ Join ပြီးပါပြီ'** ဆိုသော ခလုတ်ကို နှိပ်ပါ။"
+    )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("📢 Channel သို့ဝင်ရန်", url=CHANNEL_LINK))
+    markup.add(InlineKeyboardButton("✅ Join ပြီးပါပြီ (Check)", callback_data="check_join"))
+    
+    bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode="Markdown")
+
+# ----------------- HANDLERS -----------------
+# /start ခေါ်သည့်အခါ
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    user_id = message.chat.id
+    
+    if not is_user_joined(user_id):
+        send_force_join_msg(user_id)
+        return
+
+    if user_id not in user_voices:
+        user_voices[user_id] = VOICES["female"]
+
+    welcome_text = (
+        "မင်္ဂလာပါ! AI Voice Telegram Bot မှ ကြိုဆိုပါတယ်။ 🎙️\n\n"
+        "🎬 **Movie Recap Creator များအတွက် AI Voiceover Service**\n"
+        f"📝 တစ်ကြိမ်လျှင် စာလုံးရေ **{MAX_CHARACTERS}** အထိ ပို့ဆောင်နိုင်ပါသည်။\n\n"
+        "အောက်ပါ Button ကို နှိပ်၍ **အမျိုးသမီးအသံ (Nilar)** သို့မဟုတ် **အမျိုးသားအသံ (Thiha)** ကို ရွေးချယ်နိုင်ပါသည်။"
+    )
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("👩 အမျိုးသမီးအသံ (Nilar)", callback_data="voice_female"),
+        InlineKeyboardButton("👨 အမျိုးသားအသံ (Thiha)", callback_data="voice_male")
+    )
+    
+    bot.send_message(user_id, welcome_text, reply_markup=markup, parse_mode="Markdown")
+
+# Callback Queries (အသံပြောင်းခြင်း နှင့် Join စစ်ခြင်း)
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
+    user_id = call.message.chat.id
+    
+    if call.data == "check_join":
+        if is_user_joined(user_id):
+            bot.answer_callback_query(call.id, "✅ ကျေးဇူးတင်ပါတယ်။ Channel Join ထားတာ အတည်ပြုလိုက်ပါပြီ။")
+            bot.delete_message(user_id, call.message.message_id)
+            send_welcome(call.message)
+        else:
+            bot.answer_callback_query(call.id, "❌ Channel မဝင်ရသေးပါ။ ကျေးဇူးပြု၍ အရင် Join ပေးပါ။", show_alert=True)
+            
+    elif call.data.startswith('voice_'):
+        if not is_user_joined(user_id):
+            send_force_join_msg(user_id)
+            return
+            
+        if call.data == "voice_female":
+            user_voices[user_id] = VOICES["female"]
+            bot.answer_callback_query(call.id, "👩 အမျိုးသမီးအသံ (Nilar) သို့ ပြောင်းလိုက်ပါပြီ!")
+            bot.send_message(user_id, "✅ အမျိုးသမီးအသံ (Nilar) ကို ရွေးချယ်ထားပါသည်။ Script စာသား ပို့ပေးပါ။")
+        elif call.data == "voice_male":
+            user_voices[user_id] = VOICES["male"]
+            bot.answer_callback_query(call.id, "👨 အမျိုးသားအသံ (Thiha) သို့ ပြောင်းလိုက်ပါပြီ!")
+            bot.send_message(user_id, "✅ အမျိုးသားအသံ (Thiha) ကို ရွေးချယ်ထားပါသည်။ Script စာသား ပို့ပေးပါ။")
+
+# စာသားရောက်လာသည့်အခါ အသံဖိုင်ပြောင်းပေးခြင်း
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    user_id = message.chat.id
+    
+    if not is_user_joined(user_id):
+        send_force_join_msg(user_id)
+        return
+
+    text_to_convert = message.text
+    
+    # စာလုံးရေ ၃,၀၀၀ ကျော်လွန်ခြင်း ရှိ/မရှိ စစ်ဆေးခြင်း
+    if len(text_to_convert) > MAX_CHARACTERS:
+        bot.reply_to(
+            message, 
+            f"⚠️ **စာသား အရှည်လွန်းနေပါသည်!**\n\n"
+            f"တစ်ကြိမ်လျှင် စာလုံးရေ **{MAX_CHARACTERS}** ထက် ပို၍ မပို့ရပါ။ "
+            f"ကျေးဇူးပြု၍ စာသားကို အပိုင်းခွဲ၍ ပို့ပေးပါ။"
+        )
+        return
+
+    selected_voice = user_voices.get(user_id, VOICES["female"])
+    output_file = f"voice_{user_id}.mp3"
+
+    processing_msg = bot.reply_to(message, "⏳ AI အသံဖိုင် ထုတ်လုပ်နေပါပြီ၊ ခဏစောင့်ပါ...")
+
+    try:
+        asyncio.run(generate_audio(text_to_convert, selected_voice, output_file))
+
+        caption_text = (
+            "🎙️ သင်၏ Movie Recap အသံဖိုင် ထုတ်လုပ်ပြီးပါပြီ!\n\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "📢 **Sponsored:** (ဒီနေရာတွင် Bot ကြော်ငြာစာသား ထည့်ရန်)"
+        )
+        
+        with open(output_file, 'rb') as audio:
+            bot.send_voice(message.chat.id, audio, caption=caption_text, parse_mode="Markdown")
+
+        bot.delete_message(message.chat.id, processing_msg.message_id)
+
+        if os.path.exists(output_file):
+            os.remove(output_file)
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ အမှားအယွင်း ဖြစ်ပေါ်သွားပါသည်: {str(e)}")
+
+# Bot စတင်ခြင်း
+if __name__ == '__main__':
+    print("🤖 AI Voice Bot (Force-Join & 3000 Limit) စတင်အလုပ်လုပ်နေပါပြီ...")
+    bot.infinity_polling()
